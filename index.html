@@ -186,7 +186,7 @@ label.btn{cursor:pointer}
    ================================================================ */
 /* 사진으로 만든 챕터는 S.custom 에 저장됩니다 */
 const BUILTIN_RAW = [];
-const APP_VERSION = 'v1.1';
+const APP_VERSION = 'v1.2';
 
 /* ---------------- 유틸 ---------------- */
 const app = document.getElementById('app');
@@ -945,7 +945,7 @@ function saveChapter(){
 /* --- 사진으로 단어 넣기 --- */
 let SC = null;
 function startScan(target){
-  SC = {target, name: target ? findSet(target).name : nextChapterName(), photos:[], rows:[], stage:'pick'};
+  SC = {target, name: target ? findSet(target).name : nextChapterName(), photos:[], rows:[], stage:'pick', mode:'paste', paste:''};
   renderScan();
 }
 function renderScan(){
@@ -953,7 +953,16 @@ function renderScan(){
   app.innerHTML = topBar('📸 사진으로 단어 넣기', SC.target ? 'manage' : 'manage') + `
   ${tgt ? `<div class="selinfo" style="margin-top:0"><b>${esc(tgt.name)}</b>에 단어를 더 넣어요</div>`
         : `<div class="note" style="margin-bottom:6px">새 챕터 이름</div><input class="txt" id="scName" value="${esc(SC.name)}" oninput="SC.name=this.value">`}
-  <div class="tipbox">💡 <b>잘 읽히게 찍는 법</b><br>단어장을 평평하게 펴고 바로 위에서 찍어요. 그림자 없이 밝은 곳에서, 글자가 화면에 꽉 차게! 여러 장 넣어도 돼요.</div>
+  <div class="seg" style="margin-top:12px"><button class="${SC.mode!=='ocr'?'on':''}" onclick="SC.mode='paste';renderScan()">📋 붙여넣기 (추천)</button><button class="${SC.mode==='ocr'?'on':''}" onclick="SC.mode='ocr';renderScan()">🔍 앱에서 직접 읽기</button></div>
+  ${SC.mode!=='ocr' ? `
+  <div class="tipbox"><b>휴대폰이 사진 글자를 읽어 줘요 (가장 정확!)</b><br>
+  <b>🍎 아이폰</b> 사진 앱에서 단어장 사진 열기 → 오른쪽 아래 <b>글자 인식 버튼(▣)</b> 누르기 → 글자를 길게 눌러 <b>모두 선택 → 복사</b><br>
+  <b>🤖 갤럭시</b> 갤러리에서 사진 열기 → 오른쪽 아래 <b>T 버튼(텍스트 추출)</b> → <b>모두 선택 → 복사</b> (없으면 구글 렌즈 → 텍스트 → 모두 선택 → 복사)<br>
+  그다음 아래 칸에 붙여 넣고 '단어 찾기'를 누르세요. 사진이 여러 장이면 이어서 붙여 넣어도 돼요.</div>
+  <textarea id="pasteBox" style="min-height:180px" oninput="SC.paste=this.value" placeholder="여기를 길게 눌러 붙여넣기">${esc(SC.paste||'')}</textarea>
+  <button class="btn green" onclick="runPaste()">🔎 단어 찾기</button>`
+  : `
+  <div class="tipbox">💡 <b>잘 읽히게 찍는 법</b><br>단어장을 평평하게 펴고 바로 위에서 찍어요. 그림자 없이 밝은 곳에서, 글자가 화면에 꽉 차게! 여러 장 넣어도 돼요. (붙여넣기 방법보다 정확도가 낮아요)</div>
   <div class="row">
     <label class="btn" style="text-align:center">📷 사진 찍기<input type="file" accept="image/*" capture="environment" hidden onchange="addPhotos(this.files);this.value=''"></label>
     <label class="btn blue" style="text-align:center">🖼 앨범에서<input type="file" accept="image/*" multiple hidden onchange="addPhotos(this.files);this.value=''"></label>
@@ -965,7 +974,18 @@ function renderScan(){
       <span class="tn">${i+1}</span></div>`).join('')}</div>
   ${SC.photos.length ? `<div class="note" style="text-align:center">사진이 옆으로 누웠으면 ↻ 로 똑바로 돌려 주세요</div>
     <button class="btn green" id="ocrBtn" onclick="runOCR()">🔍 글자 읽기 (${SC.photos.length}장)</button>` : ''}
+  `}
   <div id="ocrStatus" class="ocrstatus"></div>`;
+}
+function runPaste(){
+  SC.paste = document.getElementById('pasteBox').value;
+  const ps = parsePasted(SC.paste);
+  if (!ps.length) return toast('영어 단어를 찾지 못했어요. 복사한 글을 붙여 넣었는지 확인해 주세요');
+  const exist = new Set((SC.target ? findSet(SC.target).words : []).map(w=>w.en.toLowerCase()));
+  const seen = new Set();
+  SC.rows = ps.filter(r => { const k = r.en.toLowerCase(); if (k && seen.has(k)) return false; seen.add(k); return true; })
+              .map(r => ({en:r.en, ko:r.ko, dup: !!r.en && exist.has(r.en.toLowerCase())}));
+  SC.stage = 'review'; renderReview();
 }
 function addPhotos(files){
   [...files].forEach(f => { if (/^image\//.test(f.type) || /\.(heic|jpe?g|png|webp)$/i.test(f.name)) SC.photos.push({file:f, url:URL.createObjectURL(f), rot:0}); });
@@ -1042,15 +1062,15 @@ function renderReview(){
   const tgt = SC.target ? findSet(SC.target) : null;
   const warn = SC.rows.filter(r=>!r.en||!r.ko).length, dup = SC.rows.filter(r=>r.dup).length;
   app.innerHTML = topBar('✅ 읽은 단어 확인', 'manage') + `
-  <div class="tipbox">사진에서 <b>${SC.rows.length}개</b>를 읽었어요. 틀린 글자는 칸을 눌러 고치고, 이상한 줄은 ✕로 지워 주세요.
+  <div class="tipbox"><b>${SC.rows.length}개</b>를 찾았어요. 틀린 글자는 칸을 눌러 고치고, 이상한 줄은 ✕로 지워 주세요.
   ${warn ? `<br><span style="color:#b8283a">노란 줄 ${warn}개는 비어 있는 칸이 있어요.</span>` : ''}
   ${dup ? `<br><span style="color:var(--sub)">회색 줄 ${dup}개는 이미 ${esc(tgt.name)}에 있는 단어라 저장할 때 빠져요.</span>` : ''}</div>
-  <details><summary>🖼 사진 보면서 고치기</summary><div class="thumbs big">${SC.photos.map(p=>`<div class="thumb"><img src="${p.url}" style="transform:rotate(${p.rot}deg)" onclick="window.open('${p.url}')"></div>`).join('')}</div></details>
+  ${SC.photos.length ? `<details><summary>🖼 사진 보면서 고치기</summary><div class="thumbs big">${SC.photos.map(p=>`<div class="thumb"><img src="${p.url}" style="transform:rotate(${p.rot}deg)" onclick="window.open('${p.url}')"></div>`).join('')}</div></details>` : ''}
   ${rowsEditor(SC.rows)}
   <button class="btn gray" onclick="SC.rows.push({en:'',ko:''});renderReview()">✍️ 한 줄 추가</button>
   ${!tgt ? `<div class="note" style="margin:14px 2px 6px">챕터 이름</div><input class="txt" id="rvName" value="${esc(SC.name)}" oninput="SC.name=this.value">` : ''}
   <button class="btn green" onclick="saveScan()">💾 ${tgt ? esc(tgt.name)+'에 저장' : '새 챕터로 저장'}</button>
-  <button class="btn gray" onclick="SC.stage='pick';renderScan()">← 사진 다시 고르기</button>`;
+  <button class="btn gray" onclick="SC.stage='pick';renderScan()">← 돌아가기</button>`;
 }
 function saveScan(){
   const words = cleanRows(SC.rows.filter(r=>!r.dup));
@@ -1062,6 +1082,44 @@ function saveScan(){
   SC.photos.forEach(p=>URL.revokeObjectURL(p.url)); SC = null;
   confetti(); toast(`✅ ${s.name}에 ${words.length}개 저장!`); go('home');
 }
+
+/* ===== 붙여넣은 글에서 영어-뜻 짝짓기 ===== */
+function parsePasted(text){
+  const HG = /[가-힣ㄱ-ㆎ]/;
+  const segs = [];
+  text.replace(/\r/g,'').split('\n').forEach(line => {
+    line = line.replace(/\(\s*\d+\s*\)/g,' ').replace(/[|_•·]+/g,' ').trim();
+    if (!line) return;
+    let cur = null;
+    line.split(/\s+/).forEach(w => {
+      if (!w) return;
+      const ew = w.replace(/^[^A-Za-z]+|[^A-Za-z]+$/g,'');
+      let type = null;
+      if (HG.test(w)) type = 'K';
+      else if (ew && /^[A-Za-z][A-Za-z'\-]*$/.test(ew) && /[a-zA-Z]{2,}|^[aI]$/.test(ew)) type = 'E';
+      if (!type) { if (cur && cur.t==='K') cur.s += w; else if (/^[~(]/.test(w)) { cur = {t:'K', s:w}; segs.push(cur); } return; }
+      const val = type==='E' ? ew : w;
+      if (cur && cur.t===type) cur.s += ' ' + val;
+      else { cur = {t:type, s:val}; segs.push(cur); }
+    });
+  });
+  // 연속된 같은 종류끼리 묶기
+  const runs = [];
+  segs.forEach(s => { const r = runs[runs.length-1]; if (r && r.t===s.t) r.items.push(s.s); else runs.push({t:s.t, items:[s.s]}); });
+  const pairs = [];
+  for (let i=0;i<runs.length;i++){
+    const r = runs[i]; if (r.t!=='E') continue;
+    const k = runs[i+1] && runs[i+1].t==='K' ? runs[i+1] : null;
+    if (k) i++;
+    const E = r.items, K = k ? k.items : [];
+    if (E.length === K.length) E.forEach((e,j)=>pairs.push({en:e, ko:K[j]}));
+    else if (E.length === 1) pairs.push({en:E[0], ko:K.join(' ')});
+    else { const n = Math.max(E.length, K.length); for (let j=0;j<n;j++) pairs.push({en:E[j]||'', ko:K[j]||''}); }
+  }
+  const clean = s => s.replace(/\s*,\s*/g,', ').replace(/^[,.\s]+|[,.\s]+$/g,'').replace(/\s{2,}/g,' ').trim();
+  return pairs.map(p => ({en:clean(p.en).replace(/^[A-Z](?=[a-z])/, m=>m.toLowerCase()), ko:clean(p.ko)})).filter(p => p.en || p.ko);
+}
+
 
 /* ================= 사진 글자 인식 (OCR) ================= */
 /* ===== OCR core (shared between browser & node test) ===== */
